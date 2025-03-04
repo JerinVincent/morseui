@@ -1,5 +1,5 @@
 {
-  "installationFolder": "C:\\Users\\jonat\\Music\\MorseTalk\\openCV\\build\\intermediates\\prefab_package\\debug\\prefab",
+  "installationFolder": "C:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\build\\intermediates\\prefab_package\\debug\\prefab",
   "gradlePath": ":openCV",
   "packageInfo": {
     "packageName": "openCV",
@@ -8,7 +8,7 @@
     "modules": [
       {
         "moduleName": "opencv_jni_shared",
-        "moduleHeaders": "C:\\Users\\jonat\\Music\\MorseTalk\\openCV\\native\\jni\\include",
+        "moduleHeaders": "C:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\native\\jni\\include",
         "moduleExportLibraries": [],
         "abis": []
       }

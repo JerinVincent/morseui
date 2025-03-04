@@ -1,0 +1,19 @@
+@echo off
+"C:\\Users\\jerin\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\cmake.exe" ^
+  "-HC:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\libcxx_helper" ^
+  "-DCMAKE_SYSTEM_NAME=Android" ^
+  "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" ^
+  "-DCMAKE_SYSTEM_VERSION=26" ^
+  "-DANDROID_PLATFORM=android-26" ^
+  "-DANDROID_ABI=arm64-v8a" ^
+  "-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a" ^
+  "-DANDROID_NDK=C:\\Users\\jerin\\AppData\\Local\\Android\\Sdk\\ndk\\27.0.12077973" ^
+  "-DCMAKE_ANDROID_NDK=C:\\Users\\jerin\\AppData\\Local\\Android\\Sdk\\ndk\\27.0.12077973" ^
+  "-DCMAKE_TOOLCHAIN_FILE=C:\\Users\\jerin\\AppData\\Local\\Android\\Sdk\\ndk\\27.0.12077973\\build\\cmake\\android.toolchain.cmake" ^
+  "-DCMAKE_MAKE_PROGRAM=C:\\Users\\jerin\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe" ^
+  "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=C:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\build\\intermediates\\cxx\\Debug\\53b72x1w\\obj\\arm64-v8a" ^
+  "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=C:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\build\\intermediates\\cxx\\Debug\\53b72x1w\\obj\\arm64-v8a" ^
+  "-DCMAKE_BUILD_TYPE=Debug" ^
+  "-BC:\\Users\\jerin\\Videos\\MorseTalkss\\openCV\\.cxx\\Debug\\53b72x1w\\arm64-v8a" ^
+  -GNinja ^
+  "-DANDROID_STL=c++_shared"

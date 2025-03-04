@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
@@ -17,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -25,29 +23,41 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
+import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 @Composable
-fun CameraPreviewScreen(onCameraControlReady: (CameraControl) -> Unit) {
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+fun CameraPreviewScreen(
+    onCameraControlReady: (CameraControl) -> Unit,
+    onTextDecoded: (Pair<String, String>) -> Unit // Updated to Pair<String, String>
+) {
     val lensFacing = CameraSelector.LENS_FACING_BACK
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
     val preview = Preview.Builder().build()
-    val previewView = remember { PreviewView(context) }
+    val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
 
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
     var isFullScreen by remember { mutableStateOf(false) }
     var currentZoom by remember { mutableFloatStateOf(1f) }
-    val maxZoom = 5f  // Adjust this value based on your camera's capabilities
+    val maxZoom = 5f
 
-    // Existing flash detection states
     var brightnessLevel by remember { mutableDoubleStateOf(0.0) }
     var flashStartTime by remember { mutableStateOf<Long?>(null) }
     var flashEndCandidateTime by remember { mutableStateOf<Long?>(null) }
     var flashDurations by remember { mutableStateOf(listOf<Long>()) }
     var isFlashOn by remember { mutableStateOf(false) }
+    var detectedMorse by remember { mutableStateOf("") }
+    var decodedText by remember { mutableStateOf("") }
+
+    LaunchedEffect(lensFacing, flashDurations) {
+        val (morse, text) = decodeMorse(flashDurations)
+        detectedMorse = morse
+        decodedText = text
+        Log.d("MorseDetection", "Durations: $flashDurations, Morse: $detectedMorse, Decoded: $decodedText")
+        onTextDecoded(Pair(detectedMorse, decodedText))
+    }
 
     LaunchedEffect(lensFacing) {
         val cameraProvider = context.getCameraProvider()
@@ -61,8 +71,8 @@ fun CameraPreviewScreen(onCameraControlReady: (CameraControl) -> Unit) {
                     val brightness = analyzeBrightness(imageProxy)
                     brightnessLevel = brightness
 
-                    val threshold = 110  // Increased threshold for daylight usage
-                    val debounceDuration = 50L // Debounce time in milliseconds
+                    val threshold = 110.0 // Can adjust based on testing
+                    val debounceDuration = 100L
                     val currentTime = System.currentTimeMillis()
 
                     if (brightness > threshold) {
@@ -100,17 +110,9 @@ fun CameraPreviewScreen(onCameraControlReady: (CameraControl) -> Unit) {
         cameraControl?.let(onCameraControlReady)
     }
 
-    // Wrap the camera preview in a Box with gesture detection and full screen toggle
     Box(
         modifier = Modifier
-            .then(
-                if (isFullScreen)
-                    Modifier.fillMaxSize()
-                else
-                    Modifier
-                        .fillMaxWidth()
-                        .height(screenHeight / 3)
-            )
+            .fillMaxSize()
             .pointerInput(Unit) {
                 detectTransformGestures { _, _, zoomChange, _ ->
                     val newZoom = (currentZoom * zoomChange).coerceIn(1f, maxZoom)
@@ -120,18 +122,13 @@ fun CameraPreviewScreen(onCameraControlReady: (CameraControl) -> Unit) {
                     }
                 }
             }
-            .clickable {
-                if (!isFullScreen) {
-                    isFullScreen = true
-                }
-            }
+            .clickable { if (!isFullScreen) isFullScreen = true }
     ) {
         AndroidView(
             factory = { previewView },
-            modifier = Modifier.matchParentSize()
+            modifier = Modifier.fillMaxSize()
         )
         if (isFullScreen) {
-            // Display an X icon in the top-right corner to exit full screen mode.
             IconButton(
                 onClick = { isFullScreen = false },
                 modifier = Modifier.align(Alignment.TopEnd)
@@ -144,37 +141,33 @@ fun CameraPreviewScreen(onCameraControlReady: (CameraControl) -> Unit) {
             }
         }
     }
-
-    // Show additional UI (flash detection texts) only when not in full screen mode.
-    if (!isFullScreen) {
-        Column {
-            Text(
-                text = if (isFlashOn) "Flash Detected!" else "No Flash Detected",
-                color = Color.White
-            )
-            Column(modifier = Modifier.padding(8.dp)) {
-                Text(text = "Flash Durations (ms):", color = Color.White)
-                flashDurations.forEach { duration ->
-                    Text(text = "$duration ms", color = Color.White)
-                }
-            }
-        }
-    }
 }
 
 private fun analyzeBrightness(imageProxy: ImageProxy): Double {
     val buffer = imageProxy.planes[0].buffer
     val bytes = ByteArray(buffer.remaining())
     buffer.get(bytes)
+
     val width = imageProxy.width
     val height = imageProxy.height
 
     val mat = Mat(height, width, CvType.CV_8UC1)
     mat.put(0, 0, bytes)
+
     val grayMat = Mat()
     Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_YUV2GRAY_420)
 
-    return Core.mean(grayMat).`val`[0]
+    val roi = Rect(
+        grayMat.width() / 4,
+        grayMat.height() / 4,
+        grayMat.width() / 2,
+        grayMat.height() / 2
+    )
+    val roiMat = grayMat.submat(roi)
+    Imgproc.GaussianBlur(roiMat, roiMat, Size(5.0, 5.0), 0.0)
+    val thresholdMat = Mat()
+    Imgproc.threshold(roiMat, thresholdMat, 110.0, 255.0, Imgproc.THRESH_BINARY)
+    return Core.mean(thresholdMat).`val`[0]
 }
 
 private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
@@ -185,3 +178,38 @@ private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
             }, ContextCompat.getMainExecutor(this))
         }
     }
+
+private fun decodeMorse(durations: List<Long>): Pair<String, String> {
+    val dotThreshold = 200L
+    val dashThreshold = 500L
+    val letterPauseThreshold = 800L
+    val wordPauseThreshold = 1400L
+
+    val morseToText = mapOf(
+        ".-" to "A", "-..." to "B", "-.-." to "C", "-.." to "D", "." to "E",
+        "..-." to "F", "--." to "G", "...." to "H", ".." to "I", ".---" to "J",
+        "-.-" to "K", ".-.." to "L", "--" to "M", "-." to "N", "---" to "O",
+        ".--." to "P", "--.-" to "Q", ".-." to "R", "..." to "S", "-" to "T",
+        "..-" to "U", "...-" to "V", ".--" to "W", "-..-" to "X", "-.--" to "Y",
+        "--.." to "Z", "-----" to "0", ".----" to "1", "..---" to "2", "...--" to "3",
+        "....-" to "4", "....." to "5", "-...." to "6", "--..." to "7", "---.." to "8",
+        "----." to "9"
+    )
+
+    val symbols = durations.map { duration ->
+        when {
+            duration <= dotThreshold -> "."
+            duration <= dashThreshold -> "-"
+            duration <= letterPauseThreshold -> "/"
+            duration <= wordPauseThreshold -> "//"
+            else -> ""
+        }
+    }
+
+    val morseCode = symbols.joinToString("")
+    val text = morseCode.split("//").joinToString(" ") { word ->
+        word.split("/").joinToString("") { morseToText[it] ?: "" }
+    }.trim()
+
+    return Pair(morseCode, text)
+}
