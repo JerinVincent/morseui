@@ -612,7 +612,7 @@ fun MyLottieSplashScreen(onSplashComplete: () -> Unit) {
         onSplashComplete()
     }
 }
-
+//comment
 fun getCurrentTimestamp(): String {
     return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
 }
