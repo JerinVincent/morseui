@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -26,11 +29,13 @@ import org.opencv.imgproc.Imgproc
 import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import java.util.concurrent.ExecutionException
 
 @Composable
 fun CameraPreviewScreen(
     onCameraControlReady: (CameraControl) -> Unit,
-    onTextDecoded: (Pair<String, String>) -> Unit // Updated to Pair<String, String>
+    onTextDecoded: (Triple<String, String, List<Long>>) -> Unit, // Updated to include durations
+    shouldCapture: Boolean
 ) {
     val lensFacing = CameraSelector.LENS_FACING_BACK
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -51,63 +56,97 @@ fun CameraPreviewScreen(
     var detectedMorse by remember { mutableStateOf("") }
     var decodedText by remember { mutableStateOf("") }
 
+    var roiWidth by remember { mutableStateOf(0f) }
+    var roiHeight by remember { mutableStateOf(0f) }
+    var roiX by remember { mutableStateOf(0f) }
+    var roiY by remember { mutableStateOf(0f) }
+
     LaunchedEffect(lensFacing, flashDurations) {
-        val (morse, text) = decodeMorse(flashDurations)
-        detectedMorse = morse
-        decodedText = text
-        Log.d("MorseDetection", "Durations: $flashDurations, Morse: $detectedMorse, Decoded: $decodedText")
-        onTextDecoded(Pair(detectedMorse, decodedText))
+        if (flashDurations.isNotEmpty() && shouldCapture) {
+            try {
+                val (morse, text) = decodeMorse(flashDurations)
+                detectedMorse = morse
+                decodedText = text
+                Log.d("MorseDetection", "Durations: $flashDurations, Morse: $morse, Decoded: $text")
+                onTextDecoded(Triple(morse, text, flashDurations)) // Pass durations along
+                flashDurations = emptyList() // Reset after decoding
+            } catch (e: Exception) {
+                Log.e("MorseDetection", "Error decoding Morse: ${e.message}", e)
+            }
+        }
     }
 
-    LaunchedEffect(lensFacing) {
-        val cameraProvider = context.getCameraProvider()
-        cameraProvider.unbindAll()
+    LaunchedEffect(lensFacing, shouldCapture) {
+        try {
+            val cameraProvider = context.getCameraProvider()
+            cameraProvider.unbindAll()
 
-        val imageAnalyzer = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also { analysis ->
-                analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
-                    val brightness = analyzeBrightness(imageProxy)
-                    brightnessLevel = brightness
+            val imageAnalyzer = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setTargetResolution(android.util.Size(640, 480))
+                .build()
+                .also { analysis ->
+                    analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
+                        try {
+                            val (brightness, roi) = analyzeBrightness(imageProxy)
+                            brightnessLevel = brightness
+                            roiWidth = roi.width.toFloat()
+                            roiHeight = roi.height.toFloat()
+                            roiX = roi.x.toFloat()
+                            roiY = roi.y.toFloat()
 
-                    val threshold = 110.0 // Can adjust based on testing
-                    val debounceDuration = 100L
-                    val currentTime = System.currentTimeMillis()
+                            Log.d("MorseDetection", "Brightness: $brightness, ROI: x=$roiX, y=$roiY, w=$roiWidth, h=$roiHeight")
 
-                    if (brightness > threshold) {
-                        flashEndCandidateTime = null
-                        if (!isFlashOn) {
-                            flashStartTime = currentTime
-                            isFlashOn = true
-                        }
-                    } else {
-                        if (isFlashOn && flashStartTime != null) {
-                            if (flashEndCandidateTime == null) {
-                                flashEndCandidateTime = currentTime
-                            } else if (currentTime - flashEndCandidateTime!! > debounceDuration) {
-                                val duration = currentTime - flashStartTime!!
-                                flashDurations = flashDurations + duration
-                                flashStartTime = null
-                                isFlashOn = false
-                                flashEndCandidateTime = null
+                            if (shouldCapture) {
+                                val onThreshold = 50.0 // Lowered for better sensitivity
+                                val offThreshold = 30.0
+                                val debounceDuration = 50L
+                                val currentTime = System.currentTimeMillis()
+
+                                if (brightness > onThreshold && !isFlashOn) {
+                                    flashStartTime = currentTime
+                                    isFlashOn = true
+                                    flashEndCandidateTime = null
+                                    Log.d("MorseDetection", "Flash ON at $currentTime, brightness: $brightness")
+                                } else if (brightness < offThreshold && isFlashOn && flashStartTime != null) {
+                                    if (flashEndCandidateTime == null) {
+                                        flashEndCandidateTime = currentTime
+                                    } else if (currentTime - flashEndCandidateTime!! > debounceDuration) {
+                                        val duration = flashEndCandidateTime!! - flashStartTime!!
+                                        if (duration > 50L) {
+                                            flashDurations = flashDurations + duration
+                                            Log.d("MorseDetection", "Flash OFF, duration: $duration, brightness: $brightness")
+                                        }
+                                        flashStartTime = null
+                                        isFlashOn = false
+                                        flashEndCandidateTime = null
+                                    }
+                                }
                             }
+                        } catch (e: Exception) {
+                            Log.e("MorseDetection", "Error analyzing image: ${e.message}", e)
+                        } finally {
+                            imageProxy.close()
                         }
                     }
-                    imageProxy.close()
                 }
-            }
 
-        val camera = cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            CameraSelector.Builder().requireLensFacing(lensFacing).build(),
-            preview,
-            imageAnalyzer
-        )
+            val camera = cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.Builder().requireLensFacing(lensFacing).build(),
+                preview,
+                imageAnalyzer
+            )
 
-        cameraControl = camera.cameraControl
-        preview.setSurfaceProvider(previewView.surfaceProvider)
-        cameraControl?.let(onCameraControlReady)
+            cameraControl = camera.cameraControl
+            preview.setSurfaceProvider(previewView.surfaceProvider)
+            cameraControl?.let {
+                onCameraControlReady(it)
+                Log.d("CameraPreview", "Camera control ready")
+            } ?: Log.w("CameraPreview", "Camera control is null")
+        } catch (e: Exception) {
+            Log.e("CameraPreview", "Failed to initialize camera: ${e.message}", e)
+        }
     }
 
     Box(
@@ -118,7 +157,10 @@ fun CameraPreviewScreen(
                     val newZoom = (currentZoom * zoomChange).coerceIn(1f, maxZoom)
                     if (newZoom != currentZoom) {
                         currentZoom = newZoom
-                        cameraControl?.setZoomRatio(newZoom)
+                        cameraControl?.setZoomRatio(newZoom)?.addListener(
+                            { Log.d("CameraPreview", "Zoom set to $newZoom") },
+                            ContextCompat.getMainExecutor(context)
+                        ) ?: Log.w("CameraPreview", "Camera control null during zoom")
                     }
                 }
             }
@@ -128,6 +170,30 @@ fun CameraPreviewScreen(
             factory = { previewView },
             modifier = Modifier.fillMaxSize()
         )
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (roiWidth > 0 && roiHeight > 0) {
+                // Center the ROI on the screen
+                val scaleX = size.width / 640f
+                val scaleY = size.height / 480f
+                val scaledWidth = roiWidth * scaleX
+                val scaledHeight = roiHeight * scaleY
+                val scaledX = (size.width - scaledWidth) / 2 // Center horizontally
+                val scaledY = (size.height - scaledHeight) / 2 // Center vertically
+
+                Log.d("MorseDetection", "Drawing ROI: scaledX=$scaledX, scaledY=$scaledY, scaledW=$scaledWidth, scaledH=$scaledHeight, Canvas size=${size.width}x${size.height}")
+
+                drawRect(
+                    color = Color.Red.copy(alpha = 0.5f),
+                    topLeft = Offset(scaledX, scaledY),
+                    size = Size(scaledWidth, scaledHeight),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                )
+            } else {
+                Log.w("MorseDetection", "ROI not drawn: width=$roiWidth, height=$roiHeight")
+            }
+        }
+
         if (isFullScreen) {
             IconButton(
                 onClick = { isFullScreen = false },
@@ -143,38 +209,51 @@ fun CameraPreviewScreen(
     }
 }
 
-private fun analyzeBrightness(imageProxy: ImageProxy): Double {
-    val buffer = imageProxy.planes[0].buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
+private fun analyzeBrightness(imageProxy: ImageProxy): Pair<Double, Rect> {
+    try {
+        val buffer = imageProxy.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
 
-    val width = imageProxy.width
-    val height = imageProxy.height
+        val width = imageProxy.width
+        val height = imageProxy.height
+        Log.d("MorseDetection", "Image size: ${width}x${height}")
 
-    val mat = Mat(height, width, CvType.CV_8UC1)
-    mat.put(0, 0, bytes)
+        val mat = Mat(height, width, CvType.CV_8UC1)
+        mat.put(0, 0, bytes)
 
-    val grayMat = Mat()
-    Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_YUV2GRAY_420)
+        val roiSize = minOf(width, height) / 2
+        val roiX = (width - roiSize) / 2
+        val roiY = (height - roiSize) / 2
+        val roi = Rect(roiX, roiY, roiSize, roiSize)
 
-    val roi = Rect(
-        grayMat.width() / 4,
-        grayMat.height() / 4,
-        grayMat.width() / 2,
-        grayMat.height() / 2
-    )
-    val roiMat = grayMat.submat(roi)
-    Imgproc.GaussianBlur(roiMat, roiMat, Size(5.0, 5.0), 0.0)
-    val thresholdMat = Mat()
-    Imgproc.threshold(roiMat, thresholdMat, 110.0, 255.0, Imgproc.THRESH_BINARY)
-    return Core.mean(thresholdMat).`val`[0]
+        val roiMat = mat.submat(roi)
+        val grayMat = Mat()
+        Imgproc.cvtColor(roiMat, grayMat, Imgproc.COLOR_YUV2GRAY_420)
+
+        val mean = Core.mean(grayMat).`val`[0]
+
+        mat.release()
+        roiMat.release()
+        grayMat.release()
+
+        return Pair(mean, roi)
+    } catch (e: Exception) {
+        Log.e("MorseDetection", "Error in analyzeBrightness: ${e.message}", e)
+        return Pair(0.0, Rect(0, 0, 0, 0))
+    }
 }
 
 private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
     suspendCoroutine { continuation ->
         ProcessCameraProvider.getInstance(this).also { cameraProvider ->
             cameraProvider.addListener({
-                continuation.resume(cameraProvider.get())
+                try {
+                    continuation.resume(cameraProvider.get())
+                } catch (e: ExecutionException) {
+                    Log.e("CameraPreview", "Failed to get camera provider: ${e.message}", e)
+                    continuation.resumeWith(Result.failure(e))
+                }
             }, ContextCompat.getMainExecutor(this))
         }
     }
@@ -196,14 +275,25 @@ private fun decodeMorse(durations: List<Long>): Pair<String, String> {
         "----." to "9"
     )
 
-    val symbols = durations.map { duration ->
-        when {
+    val symbols = mutableListOf<String>()
+    var lastDurationEnd = durations.firstOrNull() ?: 0L
+
+    durations.forEachIndexed { index, duration ->
+        val symbol = when {
             duration <= dotThreshold -> "."
             duration <= dashThreshold -> "-"
-            duration <= letterPauseThreshold -> "/"
-            duration <= wordPauseThreshold -> "//"
             else -> ""
         }
+        if (symbol.isNotEmpty()) symbols.add(symbol)
+
+        if (index < durations.size - 1) {
+            val gap = durations[index + 1] - (lastDurationEnd + duration)
+            when {
+                gap >= wordPauseThreshold -> symbols.add("//")
+                gap >= letterPauseThreshold -> symbols.add("/")
+            }
+        }
+        lastDurationEnd += duration
     }
 
     val morseCode = symbols.joinToString("")

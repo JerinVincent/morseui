@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import com.example.myapplication.composables.TranslateScreen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -44,7 +45,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -117,7 +117,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AppLayout(onRequestPermission: () -> Unit) {
@@ -206,6 +205,19 @@ fun AppLayout(onRequestPermission: () -> Unit) {
                                     },
                                     modifier = Modifier.padding(vertical = 2.dp)
                                 )
+                                NavigationDrawerItem(
+                                    label = { Text("Translate", color = Color.White, fontSize = 16.sp) },
+                                    selected = navController.currentDestination?.route == "translate",
+                                    onClick = {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate("translate") {
+                                            popUpTo(navController.graph.startDestinationId)
+                                            launchSingleTop = true
+                                        }
+                                        isLearnExpanded = false
+                                    },
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
                             }
                         }
                     }
@@ -232,10 +244,15 @@ fun AppLayout(onRequestPermission: () -> Unit) {
                     onOpenDrawer = { scope.launch { drawerState.open() } }
                 )
             }
+            composable("translate") {
+                TranslateScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onOpenDrawer = { scope.launch { drawerState.open() } }
+                )
+            }
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
@@ -288,6 +305,7 @@ fun HomeScreen(
         var detectedMorse by remember { mutableStateOf("") }
         var decodedText by remember { mutableStateOf("") }
         var decodedTimestamp by remember { mutableStateOf("") }
+        var flashDurations by remember { mutableStateOf(listOf<Long>()) }
 
         fun getCurrentTimestamp(): String {
             return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
@@ -308,11 +326,13 @@ fun HomeScreen(
                         onCameraControlReady = { cameraControl ->
                             Log.d("HomeScreen", "CameraControl received: $cameraControl")
                         },
-                        onTextDecoded = { (morse, text) ->
+                        onTextDecoded = { (morse, text, durations) ->
                             detectedMorse = morse
                             decodedText = text
+                            flashDurations = durations
                             decodedTimestamp = getCurrentTimestamp()
-                        }
+                        },
+                        shouldCapture = isCameraPreviewVisible
                     )
                     Text(
                         text = "Receiving...",
@@ -375,6 +395,12 @@ fun HomeScreen(
                                             text = "Decoded: $decodedText",
                                             color = Color.Yellow,
                                             fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "Durations: ${flashDurations.joinToString(", ")} ms",
+                                            color = Color.Yellow,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
@@ -465,6 +491,9 @@ fun HomeScreen(
                                 if (!isCameraPreviewVisible) {
                                     isCameraPreviewVisible = true
                                     onRequestPermission()
+                                    detectedMorse = ""
+                                    decodedText = ""
+                                    flashDurations = emptyList()
                                 } else {
                                     isCameraPreviewVisible = false
                                 }
@@ -548,7 +577,7 @@ fun HomeScreenPreview() {
     MyApplicationTheme {
         HomeScreen(
             onRequestPermission = {},
-            onOpenDrawer = {}  // Added the required parameter
+            onOpenDrawer = {}
         )
     }
 }
@@ -612,9 +641,7 @@ fun MyLottieSplashScreen(onSplashComplete: () -> Unit) {
         onSplashComplete()
     }
 }
-//comment
-//hello
-//last try
+
 fun getCurrentTimestamp(): String {
     return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
 }
