@@ -1,6 +1,5 @@
 package com.example.myapplication
 
-import com.example.myapplication.composables.TranslateScreen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -54,15 +53,16 @@ import com.example.myapplication.composables.FlashlightController
 import com.example.myapplication.composables.TextToMorse
 import com.example.myapplication.composables.ReferScreen
 import com.example.myapplication.composables.QuizScreen
+import com.example.myapplication.composables.TranslateScreen
 import kotlinx.coroutines.*
 import org.opencv.android.OpenCVLoader
-
 class MainActivity : ComponentActivity() {
 
     private val cameraPermissionRequest =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
                 Log.d("CameraPermission", "Permission granted")
+                setCameraPreview()
             } else {
                 Log.d("CameraPermission", "Permission denied")
             }
@@ -70,15 +70,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            System.loadLibrary("opencv_java4")
-            if (OpenCVLoader.initDebug()) {
-                Log.d("OpenCV", "OpenCV initialization succeeded")
-            } else {
-                Log.d("OpenCV", "OpenCV initialization failed")
-            }
-        } catch (e: UnsatisfiedLinkError) {
-            Log.e("OpenCV", "Failed to load OpenCV native library", e)
+        if (OpenCVLoader.initLocal()) {
+            Log.d("OpenCV", "OpenCV initialization succeeded")
+        } else {
+            Log.d("OpenCV", "OpenCV initialization failed")
         }
 
         setTheme(android.R.style.Theme_NoTitleBar_Fullscreen)
@@ -109,6 +104,7 @@ class MainActivity : ComponentActivity() {
         )) {
             PackageManager.PERMISSION_GRANTED -> {
                 Log.d("CameraPermission", "Permission already granted")
+                setCameraPreview()
             }
             else -> {
                 Log.d("CameraPermission", "Permission not granted, requesting")
@@ -116,7 +112,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun setCameraPreview() {
+        setContent {
+            MyApplicationTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppLayout { requestCameraPermission() }
+                }
+            }
+        }
+    }
 }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AppLayout(onRequestPermission: () -> Unit) {
@@ -253,6 +263,7 @@ fun AppLayout(onRequestPermission: () -> Unit) {
         }
     }
 }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
@@ -302,38 +313,19 @@ fun HomeScreen(
         var text by remember { mutableStateOf("") }
         val context = LocalContext.current
         var messages by remember { mutableStateOf(listOf<Pair<String, String>>()) }
-        var detectedMorse by remember { mutableStateOf("") }
-        var decodedText by remember { mutableStateOf("") }
-        var decodedTimestamp by remember { mutableStateOf("") }
-        var flashDurations by remember { mutableStateOf(listOf<Long>()) }
-
-        fun getCurrentTimestamp(): String {
-            return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        }
 
         if (isCameraPreviewVisible) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(450.dp)
+                    .height(375.dp) // This sets the Card's height; adjust as needed
                     .padding(16.dp)
-                    .border(2.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
-                shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                    .border(0.dp, Color.Red.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    CameraPreviewScreen(
-                        onCameraControlReady = { cameraControl ->
-                            Log.d("HomeScreen", "CameraControl received: $cameraControl")
-                        },
-                        onTextDecoded = { (morse, text, durations) ->
-                            detectedMorse = morse
-                            decodedText = text
-                            flashDurations = durations
-                            decodedTimestamp = getCurrentTimestamp()
-                        },
-                        shouldCapture = isCameraPreviewVisible
-                    )
+                    CameraPreviewScreen { cameraControl ->
+                        Log.d("HomeScreen", "CameraControl received: $cameraControl")
+                    }
                     Text(
                         text = "Receiving...",
                         color = Color.White.copy(alpha = 0.8f),
@@ -368,53 +360,7 @@ fun HomeScreen(
                         .fillMaxWidth(),
                     reverseLayout = true
                 ) {
-                    if (detectedMorse.isNotEmpty()) {
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp)
-                                    .animateItemPlacement(),
-                                horizontalArrangement = Arrangement.Start
-                            ) {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFD700).copy(alpha = 0.2f)),
-                                    shape = RoundedCornerShape(12.dp),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp)
-                                    ) {
-                                        Text(
-                                            text = "Detected Morse: $detectedMorse",
-                                            color = Color.Yellow,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = "Decoded: $decodedText",
-                                            color = Color.Yellow,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = "Durations: ${flashDurations.joinToString(", ")} ms",
-                                            color = Color.Yellow,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = decodedTimestamp,
-                                            color = Color.Yellow.copy(alpha = 0.7f),
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    items(messages.reversed()) { messagePair ->
+                    items(messages) { messagePair ->  // Removed .reversed()
                         val (message, timestamp) = messagePair
                         Row(
                             modifier = Modifier
@@ -428,9 +374,7 @@ fun HomeScreen(
                                 shape = RoundedCornerShape(12.dp),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp)
-                                ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
                                     Text(
                                         text = message,
                                         color = Color.White,
@@ -491,9 +435,6 @@ fun HomeScreen(
                                 if (!isCameraPreviewVisible) {
                                     isCameraPreviewVisible = true
                                     onRequestPermission()
-                                    detectedMorse = ""
-                                    decodedText = ""
-                                    flashDurations = emptyList()
                                 } else {
                                     isCameraPreviewVisible = false
                                 }
@@ -506,31 +447,6 @@ fun HomeScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun MessageBubble(message: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-    ) {
-        Card(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(start = 48.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF4CAF50)),
-            shape = RoundedCornerShape(12.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Text(
-                text = message,
-                color = Color.White,
-                fontSize = 16.sp,
-                modifier = Modifier.padding(12.dp)
-            )
         }
     }
 }
@@ -552,9 +468,7 @@ fun EnhancedButton(
                 scaleX = if (isActive) 1.05f else 1f
                 scaleY = if (isActive) 1.05f else 1f
             },
-        colors = ButtonDefaults.buttonColors(
-            containerColor = containerColor
-        ),
+        colors = ButtonDefaults.buttonColors(containerColor = containerColor),
         shape = RoundedCornerShape(12.dp),
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 4.dp,
@@ -635,7 +549,7 @@ fun MyLottieSplashScreen(onSplashComplete: () -> Unit) {
 
         MyLottie()
     }
-
+//push check
     LaunchedEffect(Unit) {
         delay(2750)
         onSplashComplete()
