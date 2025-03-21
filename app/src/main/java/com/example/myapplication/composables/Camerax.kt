@@ -11,8 +11,6 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -22,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTransformGestures // Added import
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -31,7 +30,6 @@ import kotlinx.coroutines.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.abs
-import kotlin.math.max
 import org.opencv.imgproc.Imgproc
 import org.opencv.core.*
 
@@ -48,11 +46,9 @@ fun CameraPreviewScreen(
     val previewView = remember { PreviewView(context) }
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
 
-    // Zoom
     var currentZoom by remember { mutableFloatStateOf(1.5f) }
     val maxZoom = 6f
 
-    // ROI size
     var roiX by remember { mutableFloatStateOf(0f) }
     var roiY by remember { mutableFloatStateOf(0f) }
     var roiSize by remember { mutableFloatStateOf(0f) }
@@ -65,13 +61,9 @@ fun CameraPreviewScreen(
     var isFlashOn by remember { mutableStateOf(false) }
     var previousBrightness by remember { mutableDoubleStateOf(0.0) }
 
-    var maxTemporalDelta by remember { mutableDoubleStateOf(0.0) }
-
-    // Morse code detection
     var lastProcessedTime by remember { mutableStateOf(0L) }
     val morseCodeBuilder = remember { StringBuilder() }
 
-    // Morse-to-text mapping
     val morseToTextMap = mapOf(
         ".-" to "A", "-..." to "B", "-.-." to "C", "-.." to "D", "." to "E",
         "..-." to "F", "--." to "G", "...." to "H", ".." to "I", ".---" to "J",
@@ -84,7 +76,7 @@ fun CameraPreviewScreen(
     )
 
     fun morseToText(morse: String): String {
-        val words = morse.trim().split("\\s+".toRegex()) // Split by one or more spaces
+        val words = morse.trim().split("\\s+".toRegex())
         return words.map { morseToTextMap[it] ?: "?" }.joinToString("")
     }
 
@@ -109,46 +101,57 @@ fun CameraPreviewScreen(
                         }
 
                         val temporalDelta = brightness - previousBrightness
-                        maxTemporalDelta = max(maxTemporalDelta, temporalDelta)
-
                         previousBrightness = brightness
 
                         val deltaThreshold = 20.0
-                        val currentTime = System.currentTimeMillis() // Define currentTime here
+                        val currentTime = System.currentTimeMillis()
 
                         if (abs(temporalDelta) > deltaThreshold) {
                             if (temporalDelta > deltaThreshold && !isFlashOn) {
                                 flashEndTime?.let { endTime ->
                                     val offDuration = currentTime - endTime
-                                    if (offDuration > 100) {
+                                    if (offDuration > 200) {
                                         flashDurations = flashDurations + (-offDuration)
-                                        flashStartTime = currentTime
-                                        isFlashOn = true
+                                        Log.d("MorseDetect", "Off duration: $offDuration ms")
                                     }
-                                } ?: run {
-                                    flashStartTime = currentTime
-                                    isFlashOn = true
                                 }
+                                flashStartTime = currentTime
+                                isFlashOn = true
+                                Log.d("MorseDetect", "Flash ON at $currentTime")
                             } else if (temporalDelta < -deltaThreshold && isFlashOn) {
                                 flashStartTime?.let { startTime ->
                                     val onDuration = currentTime - startTime
                                     flashDurations = flashDurations + onDuration
+                                    Log.d("MorseDetect", "Flash OFF, onDuration: $onDuration ms")
                                 }
                                 flashEndTime = currentTime
                                 isFlashOn = false
                             }
                         }
 
-                        // Process flash durations every 2 seconds or when flash ends
-                        if (currentTime - lastProcessedTime > 2000 && flashDurations.isNotEmpty()) {
-                            val morseCode = decodeFlashDurations(flashDurations)
-                            if (morseCode.isNotEmpty()) {
-                                morseCodeBuilder.append(morseCode)
-                                val fullMorseCode = morseCodeBuilder.toString()
-                                val decodedText = morseToText(fullMorseCode)
-                                onMorseCodeDetected(fullMorseCode, decodedText)
+                        val timeSinceLastProcess = currentTime - lastProcessedTime
+                        val lastDuration = flashDurations.lastOrNull()
+                        val hasLetterGap = lastDuration?.let { it < -1000 && it > -1400 } ?: false // 1200ms letter gap
+                        val hasWordGap = lastDuration?.let { it < -1400 } ?: false // > 1400ms word gap
+
+                        if (flashDurations.isNotEmpty() && (hasLetterGap || hasWordGap || timeSinceLastProcess > 3000)) {
+                            val morseSegment = decodeFlashDurations(flashDurations)
+                            if (morseSegment.isNotEmpty()) {
+                                if (morseCodeBuilder.isNotEmpty() && (hasLetterGap || hasWordGap)) {
+                                    morseCodeBuilder.append(" ")
+                                }
+                                morseCodeBuilder.append(morseSegment)
+                                Log.d("MorseDetect", "Segment decoded: $morseSegment, Morse so far: ${morseCodeBuilder.toString()}")
+
+                                if (hasWordGap || timeSinceLastProcess > 3000) {
+                                    val fullMorseCode = morseCodeBuilder.toString()
+                                    val decodedText = morseToText(fullMorseCode)
+                                    onMorseCodeDetected(fullMorseCode, decodedText)
+                                    Log.d("MorseDetect", "Final decode: $fullMorseCode -> $decodedText")
+                                    morseCodeBuilder.clear()
+                                }
                             }
-                            flashDurations = emptyList() // Reset durations after processing
+                            flashDurations = emptyList()
                             lastProcessedTime = currentTime
                         }
 
@@ -169,7 +172,6 @@ fun CameraPreviewScreen(
         preview.setSurfaceProvider(previewView.surfaceProvider)
         cameraControl?.let(onCameraControlReady)
 
-        // Disable auto adjustments
         val camera2Control = Camera2CameraControl.from(cameraControl!!)
         val captureRequestOptions = CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
@@ -228,18 +230,24 @@ private fun decodeFlashDurations(durations: List<Long>): String {
     var i = 0
     while (i < durations.size) {
         val duration = durations[i]
-        if (duration > 0) { // Positive durations are flashes
-            if (duration < 250) { // Dot threshold: less than 250ms
+        if (duration > 0) { // Flash on
+            if (duration < 350) {
                 morseCode.append(".")
-            } else { // Dash threshold: 250ms or more
+                Log.d("MorseDetect", "Dot detected: $duration ms")
+            } else {
                 morseCode.append("-")
+                Log.d("MorseDetect", "Dash detected: $duration ms")
             }
-        } else { // Negative durations are gaps
+        } else { // Flash off
             val gap = -duration
-            if (gap > 500) { // Word space threshold: more than 500ms
-                morseCode.append("  ") // Two spaces for word separation
-            } else if (gap > 150) { // Letter space threshold: more than 200ms
+            if (gap > 1400) { // Word gap
+                morseCode.append("  ")
+                Log.d("MorseDetect", "Word gap detected: $gap ms")
+            } else if (gap > 1000) { // Letter gap
                 morseCode.append(" ")
+                Log.d("MorseDetect", "Letter gap detected: $gap ms")
+            } else {
+                Log.d("MorseDetect", "Intra-letter gap ignored: $gap ms")
             }
         }
         i++
@@ -284,18 +292,14 @@ private fun analyzeBrightness(imageProxy: ImageProxy, roiSizeRatio: Int): Bright
         val roi = enhancedMat.submat(Rect(roiX, roiY, roiSize, roiSize))
         val brightness = Core.mean(roi).`val`[0]
 
-        // Find the brightest pixel in the ROI
         val minMax = Core.minMaxLoc(roi)
         val maxBrightness = minMax.maxVal
 
-        // Convert to 1D array
         val roiPixels = ByteArray(roi.total().toInt())
         roi.get(0, 0, roiPixels)
 
-        // Define threshold (e.g., 70% of max brightness)
         val minBrightnessThreshold = maxBrightness * 0.7
 
-        // Filter pixels above threshold and compute mean
         val brightPixels = roiPixels.filter { it.toInt() and 0xFF > minBrightnessThreshold }
         val avgBrightness = if (brightPixels.isNotEmpty()) {
             brightPixels.sumOf { it.toInt() and 0xFF } / brightPixels.size.toDouble()
@@ -308,9 +312,10 @@ private fun analyzeBrightness(imageProxy: ImageProxy, roiSizeRatio: Int): Bright
         grayMat.release()
         mat.release()
 
-        return BrightnessResult(avgBrightness, roiX, roiY, roiSize)
+        BrightnessResult(avgBrightness, roiX, roiY, roiSize)
 
     } catch (e: Exception) {
+        Log.e("MorseDetect", "Brightness analysis failed: ${e.message}")
         BrightnessResult(0.0, 0, 0, 0)
     }
 }
