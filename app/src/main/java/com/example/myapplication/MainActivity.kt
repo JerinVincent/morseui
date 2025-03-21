@@ -30,6 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -55,7 +56,8 @@ import com.example.myapplication.composables.ReferScreen
 import com.example.myapplication.composables.QuizScreen
 import com.example.myapplication.composables.TranslateScreen
 import kotlinx.coroutines.*
-import org.opencv.android.OpenCVLoader
+import org.opencv.android.OpenCVLoader // Added import
+
 class MainActivity : ComponentActivity() {
 
     private val cameraPermissionRequest =
@@ -313,19 +315,28 @@ fun HomeScreen(
         var text by remember { mutableStateOf("") }
         val context = LocalContext.current
         var messages by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+        val listState = rememberLazyListState()
 
         if (isCameraPreviewVisible) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(375.dp) // This sets the Card's height; adjust as needed
+                    .height(375.dp)
                     .padding(16.dp)
                     .border(0.dp, Color.Red.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    CameraPreviewScreen { cameraControl ->
-                        Log.d("HomeScreen", "CameraControl received: $cameraControl")
-                    }
+                    CameraPreviewScreen(
+                        onCameraControlReady = { cameraControl ->
+                            Log.d("HomeScreen", "CameraControl received: $cameraControl")
+                        },
+                        onMorseCodeDetected = { morseCode, decodedText ->
+                            messages = messages + Pair(
+                                "Received: $morseCode ($decodedText)",
+                                getCurrentTimestamp()
+                            )
+                        }
+                    )
                     Text(
                         text = "Receiving...",
                         color = Color.White.copy(alpha = 0.8f),
@@ -358,9 +369,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    reverseLayout = true
+                    reverseLayout = false,
+                    state = listState
                 ) {
-                    items(messages) { messagePair ->  // Removed .reversed()
+                    items(messages) { messagePair ->
                         val (message, timestamp) = messagePair
                         Row(
                             modifier = Modifier
@@ -388,6 +400,12 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                LaunchedEffect(messages) {
+                    if (messages.isNotEmpty()) {
+                        listState.animateScrollToItem(messages.size - 1)
                     }
                 }
 
@@ -549,7 +567,7 @@ fun MyLottieSplashScreen(onSplashComplete: () -> Unit) {
 
         MyLottie()
     }
-//push check
+
     LaunchedEffect(Unit) {
         delay(2750)
         onSplashComplete()
