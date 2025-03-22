@@ -352,7 +352,7 @@ private fun analyzeBrightness(imageProxy: ImageProxy, roiSizeRatio: Int): Bright
         return BrightnessResult(0.0, 0, 0, 0)
     }
 }
-
+//hi work
 private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
     suspendCoroutine { continuation ->
         ProcessCameraProvider.getInstance(this).also { cameraProvider ->
