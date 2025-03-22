@@ -436,9 +436,9 @@ fun HomeScreen(
                             onClick = {
                                 if (text.isNotEmpty()) {
                                     val textToMorse = TextToMorse()
-                                    val morseCode = textToMorse.translateToMorse(text)
+                                    val morseCode = textToMorse.translateToMorse(text) // This line is now redundant
                                     val flashlightController = FlashlightController(context)
-                                    flashlightController.transmitMorseCode(morseCode)
+                                    flashlightController.transmitMorseCode(text) // Pass raw text directly
                                     messages = messages + Pair(text, getCurrentTimestamp())
                                     text = ""
                                 }

@@ -20,7 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTransformGestures // Added import
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -121,36 +121,69 @@ fun CameraPreviewScreen(
                             } else if (temporalDelta < -deltaThreshold && isFlashOn) {
                                 flashStartTime?.let { startTime ->
                                     val onDuration = currentTime - startTime
-                                    flashDurations = flashDurations + onDuration
-                                    Log.d("MorseDetect", "Flash OFF, onDuration: $onDuration ms")
+                                    if (onDuration > 50) { // Filter out noise
+                                        flashDurations = flashDurations + onDuration
+                                        Log.d("MorseDetect", "Flash OFF, onDuration: $onDuration ms")
+                                    }
                                 }
                                 flashEndTime = currentTime
                                 isFlashOn = false
                             }
+                            // Update lastProcessedTime after each flash event
+                            lastProcessedTime = currentTime
                         }
 
                         val timeSinceLastProcess = currentTime - lastProcessedTime
                         val lastDuration = flashDurations.lastOrNull()
-                        val hasLetterGap = lastDuration?.let { it < -1000 && it > -1400 } ?: false // 1200ms letter gap
-                        val hasWordGap = lastDuration?.let { it < -1400 } ?: false // > 1400ms word gap
+                        val hasLetterGap = lastDuration?.let { it < -1000 && it > -1400 } ?: false // 1000–1400ms letter gap
+                        val hasWordGap = lastDuration?.let { it < -1400 } ?: false // >1400ms word gap
 
                         if (flashDurations.isNotEmpty() && (hasLetterGap || hasWordGap || timeSinceLastProcess > 3000)) {
                             val morseSegment = decodeFlashDurations(flashDurations)
                             if (morseSegment.isNotEmpty()) {
-                                if (morseCodeBuilder.isNotEmpty() && (hasLetterGap || hasWordGap)) {
-                                    morseCodeBuilder.append(" ")
+                                // Append segment with a space after each letter
+                                if (morseCodeBuilder.isNotEmpty()) {
+                                    if (hasWordGap) {
+                                        morseCodeBuilder.append("  ") // Word gap
+                                    } else if (hasLetterGap || timeSinceLastProcess > 3000) {
+                                        morseCodeBuilder.append(" ") // Letter gap or timeout
+                                    }
                                 }
                                 morseCodeBuilder.append(morseSegment)
+                                // Add a space after the segment if it’s a letter
+                                if (!hasWordGap) {
+                                    morseCodeBuilder.append(" ")
+                                }
                                 Log.d("MorseDetect", "Segment decoded: $morseSegment, Morse so far: ${morseCodeBuilder.toString()}")
 
-                                if (hasWordGap || timeSinceLastProcess > 3000) {
-                                    val fullMorseCode = morseCodeBuilder.toString()
-                                    val decodedText = morseToText(fullMorseCode)
-                                    onMorseCodeDetected(fullMorseCode, decodedText)
-                                    Log.d("MorseDetect", "Final decode: $fullMorseCode -> $decodedText")
+                                // Send updated message
+                                val fullMorseCode = morseCodeBuilder.toString().trim()
+                                val decodedText = morseToText(fullMorseCode)
+                                onMorseCodeDetected(fullMorseCode, decodedText)
+                                Log.d("MorseDetect", "Current decode: $fullMorseCode -> $decodedText")
+
+                                // Clear durations after each segment
+                                flashDurations = emptyList()
+                                lastProcessedTime = currentTime
+
+                                // Reset only on word gap
+                                if (hasWordGap) {
                                     morseCodeBuilder.clear()
+                                    Log.d("MorseDetect", "Word gap detected, resetting builder")
                                 }
+                            } else {
+                                flashDurations = emptyList()
+                                lastProcessedTime = currentTime
                             }
+                        }
+
+                        // Hard reset after long inactivity
+                        if (timeSinceLastProcess > 5000 && morseCodeBuilder.isNotEmpty()) {
+                            val fullMorseCode = morseCodeBuilder.toString().trim()
+                            val decodedText = morseToText(fullMorseCode)
+                            onMorseCodeDetected(fullMorseCode, decodedText)
+                            Log.d("MorseDetect", "Inactivity timeout: $fullMorseCode -> $decodedText")
+                            morseCodeBuilder.clear()
                             flashDurations = emptyList()
                             lastProcessedTime = currentTime
                         }
@@ -316,7 +349,7 @@ private fun analyzeBrightness(imageProxy: ImageProxy, roiSizeRatio: Int): Bright
 
     } catch (e: Exception) {
         Log.e("MorseDetect", "Brightness analysis failed: ${e.message}")
-        BrightnessResult(0.0, 0, 0, 0)
+        return BrightnessResult(0.0, 0, 0, 0)
     }
 }
 

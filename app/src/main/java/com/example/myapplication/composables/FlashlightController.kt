@@ -15,6 +15,7 @@ class FlashlightController(private val context: Context) {
 
     private var cameraControl: androidx.camera.core.CameraControl? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private val textToMorse = TextToMorse() // Instance of TextToMorse for conversion
 
     init {
         Log.d("FlashTransmit", "FlashlightController initialized")
@@ -46,23 +47,29 @@ class FlashlightController(private val context: Context) {
         cameraControl?.enableTorch(false) ?: Log.w("FlashTransmit", "Failed to turn off flashlight: cameraControl is null")
     }
 
-    fun transmitMorseCode(morseCode: String) {
+    fun transmitMorseCode(input: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            Log.d("FlashTransmit", "Starting transmission with Morse: '$morseCode'")
+            Log.d("FlashTransmit", "Starting transmission with input: '$input'")
             delay(1000) // Initial delay to ensure receiver is ready
+
+            // Preprocess input: split into characters and add spaces between letters
+            val spacedInput = input.uppercase().split("").joinToString(" ") { it.trim() }.trim()
+            val morseCode = textToMorse.translateToMorse(spacedInput)
+            Log.d("FlashTransmit", "Converted to spaced Morse: '$morseCode'")
+
             var flashCount = 0
             for (char in morseCode) {
                 Log.d("FlashTransmit", "Processing character: '$char'")
                 when (char) {
                     '.' -> {
-                        blink(200) // Increased from 100ms to 200ms
+                        blink(200) // Dot duration
                         flashCount++
                     }
                     '-' -> {
-                        blink(600) // Increased from 400ms to 600ms
+                        blink(600) // Dash duration
                         flashCount++
                     }
-                    ' ' -> delay(1000) // Increased from 700ms to 1000ms
+                    ' ' -> delay(1000) // Space between letters or words (word gap if longer)
                 }
             }
             Log.d("FlashTransmit", "Transmission complete. Total flashes: $flashCount")
@@ -75,6 +82,6 @@ class FlashlightController(private val context: Context) {
         delay(duration)
         turnOffFlashlight()
         Log.d("FlashTransmit", "Flash OFF for 400ms")
-        delay(400) // Increased from 200ms to 400ms for clearer gaps
+        delay(400) // Gap between dots and dashes within a letter
     }
 }
